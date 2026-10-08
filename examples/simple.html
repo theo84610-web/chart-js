@@ -4,6 +4,52 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>FCSAPI Chart - Simple Example</title>
+    <script>
+        const NativeWebSocket = window.WebSocket;
+        const connectionState = {
+            socketOpen: false,
+            retrying: false,
+            disconnectedAt: null,
+            lastServerPingAt: null,
+            oandaStatus: 'red'
+        };
+
+        function emitConnectionState() {
+            window.dispatchEvent(new CustomEvent('fcsapi-connection-state', { detail: { ...connectionState } }));
+        }
+
+        class ChartWebSocket extends NativeWebSocket {
+            constructor(...args) {
+                super(...args);
+                this.addEventListener('open', () => {
+                    connectionState.socketOpen = true;
+                    connectionState.retrying = false;
+                    connectionState.disconnectedAt = null;
+                    emitConnectionState();
+                });
+                this.addEventListener('close', () => {
+                    connectionState.socketOpen = false;
+                    connectionState.retrying = true;
+                    connectionState.disconnectedAt = Date.now();
+                    emitConnectionState();
+                });
+                this.addEventListener('message', (event) => {
+                    try {
+                        const message = JSON.parse(event.data);
+                        if (message.type !== 'ping') return;
+                        connectionState.lastServerPingAt = Date.now();
+                        connectionState.oandaStatus = message.oandaStatus;
+                        emitConnectionState();
+                    } catch (error) {
+                        console.error('Invalid chart connection status frame.', error);
+                    }
+                });
+            }
+
+        }
+
+        window.WebSocket = ChartWebSocket;
+    </script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         html, body {
@@ -40,9 +86,14 @@
 
         const loadChartData = FCSAPIChart.prototype.loadData;
         FCSAPIChart.prototype.loadData = async function (...args) {
+            const requestedSymbol = this.options.symbol;
+            const requestedPeriod = this.options.period;
             const result = await loadChartData.apply(this, args);
             const subscription = `${this.options.symbol}|${this.options.period}`;
-            if (this.engine.data.length > 0 && this._liveSocketSubscription !== subscription) {
+            if (this.engine.data.length > 0
+                && this.options.symbol === requestedSymbol
+                && this.options.period === requestedPeriod
+                && this._liveSocketSubscription !== subscription) {
                 this.engine.socketManager.joinSymbol(this.options.symbol, this.options.period);
                 this._liveSocketSubscription = subscription;
             }
@@ -50,7 +101,41 @@
         };
 
         const apiUrl = `${window.location.origin}/api/candles?`;
+        const searchApiUrl = `${window.location.origin}/api/symbols`;
         const socketUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
+        function updateConnectionIcon() {
+            const period = document.querySelector('.fcsapi-info-line .fcsapi-info-period');
+            if (!period) return;
+            let icon = period.parentElement.querySelector('.fcsapi-connection-status');
+            if (!icon) {
+                icon = document.createElement('span');
+                icon.className = 'fcsapi-connection-status';
+                icon.setAttribute('role', 'img');
+                icon.innerHTML = '<svg viewBox="0 0 20 16" aria-hidden="true"><path d="M2 5.5a12 12 0 0 1 16 0M5 8.5a7.5 7.5 0 0 1 10 0M8 11.5a3 3 0 0 1 4 0"/><circle cx="10" cy="14" r="1"/></svg>';
+                period.after(icon);
+            }
+
+            const now = Date.now();
+            const socketStatus = !connectionState.socketOpen
+                ? (connectionState.retrying && now - connectionState.disconnectedAt < 15000 ? 'yellow' : 'red')
+                : (!connectionState.lastServerPingAt || now - connectionState.lastServerPingAt >= 3000 ? 'yellow' : 'green');
+            const severity = { green: 0, yellow: 1, red: 2 };
+            const status = severity[connectionState.oandaStatus] > severity[socketStatus]
+                ? connectionState.oandaStatus
+                : socketStatus;
+            const labels = { green: 'Live connection', yellow: 'Connection delayed or reconnecting', red: 'Disconnected' };
+            icon.dataset.state = status;
+            icon.setAttribute('aria-label', labels[status]);
+            icon.title = labels[status];
+        }
+
+        window.addEventListener('fcsapi-connection-state', updateConnectionIcon);
+        new MutationObserver(updateConnectionIcon).observe(document.getElementById('fcs_chart'), {
+            childList: true,
+            subtree: true
+        });
+        setInterval(updateConnectionIcon, 250);
+
         const chart = new FCSAPIChart({
             // REQUIRED (3 settings)
             container: document.getElementById('fcs_chart'),
@@ -58,18 +143,24 @@
             accessKey: 'local',
             socketApiKey: 'local',
             apiUrl,
+            searchApiUrl,
             socketUrl,
 
             // OPTIONAL - Common settings
             symbol: 'FX:XAUUSD',                 // Chart symbol mapped to OANDA XAU_USD
             period: '1H',                         // Timeframe
             theme: 'dark',                        // 'dark' or 'light'
-            enableSearch: false,
+            enableSearch: true,
             enableSymbolInfo: false
         });
 
         // The bundle applies its built-in apiUrl after constructor options.
         chart.options.apiUrl = apiUrl;
+        chart.options.searchApiUrl = searchApiUrl;
+        if (window._fcsapiSearchManager?.menuSearch) {
+            window._fcsapiSearchManager.menuSearch.apiEndpoint = searchApiUrl;
+            window._fcsapiSearchManager.menuSearch.customApiEndpoint = true;
+        }
 
         // That's it! The chart is now ready with all default features enabled.
 
