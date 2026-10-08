@@ -11,7 +11,11 @@
     "src/chunks/"
   ],
   "scripts": {
-    "test": "echo \"No tests specified\" && exit 0"
+    "start": "node --env-file=.env server.js",
+    "test": "node --test"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
   },
   "repository": {
     "type": "git",
@@ -38,5 +42,8 @@
   "bugs": {
     "url": "https://github.com/fcsapi/chart-js/issues"
   },
-  "homepage": "https://fcsapi.com"
+  "homepage": "https://fcsapi.com",
+  "devDependencies": {
+    "playwright": "^1.64.0"
+  }
 }

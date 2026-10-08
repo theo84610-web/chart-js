@@ -14,8 +14,7 @@
         }
     </style>
 
-    <!-- Load from GitHub CDN -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/fcsapi/chart-js/src/fcsapi-chart.css">
+    <link rel="stylesheet" href="../src/fcsapi-chart.css">
 
 </head>
 <body>
@@ -23,8 +22,7 @@
         <div id="fcs_chart"></div>
     </div>
 
-    <!-- Load from GitHub CDN -->
-    <script src="https://cdn.jsdelivr.net/gh/fcsapi/chart-js/src/fcsapi-chart.js"></script>
+    <script src="../src/fcsapi-chart.js"></script>
 
     <script>
         // Mobile height fix
@@ -40,17 +38,38 @@
         // Only required settings + most common options
         // For all options, see index.html (Full Example)
 
+        const loadChartData = FCSAPIChart.prototype.loadData;
+        FCSAPIChart.prototype.loadData = async function (...args) {
+            const result = await loadChartData.apply(this, args);
+            const subscription = `${this.options.symbol}|${this.options.period}`;
+            if (this.engine.data.length > 0 && this._liveSocketSubscription !== subscription) {
+                this.engine.socketManager.joinSymbol(this.options.symbol, this.options.period);
+                this._liveSocketSubscription = subscription;
+            }
+            return result;
+        };
+
+        const apiUrl = `${window.location.origin}/api/candles?`;
+        const socketUrl = `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}/ws`;
         const chart = new FCSAPIChart({
             // REQUIRED (3 settings)
             container: document.getElementById('fcs_chart'),
             parentid: 'fcs_chartparent',
-            accessKey: 'YOUR_ACCESS_KEY',        // Get from fcsapi.com/dashboard
+            accessKey: 'local',
+            socketApiKey: 'local',
+            apiUrl,
+            socketUrl,
 
             // OPTIONAL - Common settings
-            symbol: 'BINANCE:BTCUSDT',           // Symbol to display
+            symbol: 'FX:XAUUSD',                 // Chart symbol mapped to OANDA XAU_USD
             period: '1H',                         // Timeframe
-            theme: 'dark'                         // 'dark' or 'light'
+            theme: 'dark',                        // 'dark' or 'light'
+            enableSearch: false,
+            enableSymbolInfo: false
         });
+
+        // The bundle applies its built-in apiUrl after constructor options.
+        chart.options.apiUrl = apiUrl;
 
         // That's it! The chart is now ready with all default features enabled.
 
